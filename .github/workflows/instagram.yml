@@ -1,0 +1,59 @@
+name: Shop-Now daily Instagram post
+
+on:
+  schedule:
+    - cron: "20 * * * *"      # hourly; the script posts once per day at local 08:00 (or the next hour after a failure)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = test the Instagram connection (posts nothing), dry_run = show today's post (posts nothing), post_now = post immediately"
+        type: choice
+        options: [check, dry_run, post_now]
+        default: check
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shopnow-instagram
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests pillow tzdata
+      - name: Install Inter font
+        run: |
+          curl -sL https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip -o /tmp/inter.zip
+          unzip -q -j /tmp/inter.zip "extras/otf/*" -d /tmp/inter
+          sudo mkdir -p /usr/share/fonts/opentype/inter
+          sudo cp /tmp/inter/*.otf /usr/share/fonts/opentype/inter/
+      - name: Draw the product cards
+        run: python cards.py
+      - name: Publish card images (Instagram needs a public link)
+        run: |
+          git config user.name "shopnow-instagram-agent"
+          git config user.email "actions@users.noreply.github.com"
+          git add images captions.json
+          git diff --cached --quiet || (git commit -m "Update product cards" && git pull --rebase -q && git push)
+      - name: Post
+        run: python post_instagram.py
+        env:
+          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          IG_CONNECTED_ACCOUNT_ID: ${{ vars.IG_CONNECTED_ACCOUNT_ID }}
+          POST_TZ: ${{ vars.POST_TZ }}
+          CHECK: ${{ github.event.inputs.mode == 'check' && '1' || '' }}
+          DRY_RUN: ${{ github.event.inputs.mode == 'dry_run' && '1' || '' }}
+          FORCE: ${{ github.event.inputs.mode == 'post_now' && '1' || '' }}
+      - name: Save post history
+        if: always()
+        run: |
+          git config user.name "shopnow-instagram-agent"
+          git config user.email "actions@users.noreply.github.com"
+          git add ig_history.json
+          git diff --cached --quiet || (git commit -m "Update Instagram history" && git pull --rebase -q && git push)
