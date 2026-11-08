@@ -44,7 +44,7 @@ def run_tool(slug, args, timeout=120):
     body = {"arguments": args}
     if ACC:
         body["connected_account_id"] = ACC
-    r = requests.post(API + slug, headers={"x-api-key": KEY, "content-type": "application/json"}, json=body, timeout=timeout)
+    r = requests.post(API + slug, headers={("x-consumer-api-key" if KEY.startswith("ck_") else "x-api-key"): KEY, "content-type": "application/json"}, json=body, timeout=timeout)
     try:
         data = r.json()
     except ValueError:
