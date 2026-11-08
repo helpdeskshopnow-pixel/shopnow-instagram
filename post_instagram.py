@@ -40,19 +40,68 @@ def save(h):
     HISTORY.write_text(json.dumps(h, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+MCP_URL = "https://connect.composio.dev/mcp"
+_sess = {}
+
+
+def _mcp(method, params=None, rid=1, timeout=120):
+    h = {"x-consumer-api-key": KEY, "content-type": "application/json", "accept": "application/json, text/event-stream"}
+    if _sess.get("id"):
+        h["mcp-session-id"] = _sess["id"]
+    body = {"jsonrpc": "2.0", "method": method}
+    if params is not None:
+        body["params"] = params
+    if rid is not None:
+        body["id"] = rid
+    r = requests.post(MCP_URL, headers=h, json=body, timeout=timeout)
+    if r.headers.get("mcp-session-id"):
+        _sess["id"] = r.headers["mcp-session-id"]
+    if rid is None:
+        return None
+    if r.status_code >= 400:
+        raise RuntimeError(f"MCP {method}: HTTP {r.status_code} {r.text[:300]}")
+    if "text/event-stream" in r.headers.get("content-type", ""):
+        msgs = [json.loads(l[5:]) for l in r.text.splitlines() if l.startswith("data:") and l[5:].strip()]
+        msg = next((m for m in msgs if m.get("id") == rid), msgs[-1] if msgs else {})
+    else:
+        msg = r.json()
+    if "error" in msg:
+        raise RuntimeError(f"MCP {method}: {str(msg['error'])[:300]}")
+    return msg.get("result") or {}
+
+
 def run_tool(slug, args, timeout=120):
-    body = {"arguments": args}
-    if ACC:
-        body["connected_account_id"] = ACC
-    r = requests.post(API + slug, headers={("x-consumer-api-key" if KEY.startswith("ck_") else "x-api-key"): KEY, "content-type": "application/json"}, json=body, timeout=timeout)
+    """Runs one Composio tool through the Composio MCP endpoint (ck_ consumer key) or the REST API (project key)."""
+    if not KEY.startswith("ck_"):
+        body = {"arguments": args}
+        if ACC:
+            body["connected_account_id"] = ACC
+        r = requests.post(API + slug, headers={"x-api-key": KEY, "content-type": "application/json"}, json=body, timeout=timeout)
+        try:
+            data = r.json()
+        except ValueError:
+            raise RuntimeError(f"{slug}: HTTP {r.status_code}, non-JSON reply")
+        if not r.ok or data.get("successful") is False or data.get("error"):
+            raise RuntimeError(f"{slug}: HTTP {r.status_code} {str(data.get('error') or data)[:300]}")
+        return data.get("data", data)
+    if not _sess.get("init"):
+        _mcp("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "shopnow-agent", "version": "1"}})
+        _mcp("notifications/initialized", rid=None)
+        _sess["init"] = True
+    res = _mcp("tools/call", {"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "arguments": {
+        "tools": [{"tool_slug": slug, "arguments": args}], "sync_response_to_workbench": False}}, rid=2, timeout=timeout)
+    text = "".join(c.get("text", "") for c in res.get("content", []) if isinstance(c, dict))
     try:
-        data = r.json()
+        data = json.loads(text)
     except ValueError:
-        raise RuntimeError(f"{slug}: HTTP {r.status_code}, non-JSON reply")
-    ok = r.ok and data.get("successful", data.get("successfull", True)) is not False and not data.get("error")
-    if not ok:
-        raise RuntimeError(f"{slug}: HTTP {r.status_code} {str(data.get('error') or data)[:300]}")
-    return data.get("data", data)
+        raise RuntimeError(f"{slug}: unreadable reply {text[:300]}")
+    if res.get("isError") or data.get("successful") is False or data.get("error"):
+        raise RuntimeError(f"{slug}: {str(data.get('error') or text)[:300]}")
+    results = (data.get("data") or {}).get("results") or []
+    first = results[0] if results else {}
+    if first.get("error"):
+        raise RuntimeError(f"{slug}: {str(first['error'])[:300]}")
+    return first.get("response", first)
 
 
 def find_id(o):
@@ -82,7 +131,7 @@ def main():
     if not KEY:
         print("Missing COMPOSIO_API_KEY"); return 2
     if os.environ.get("CHECK") == "1":
-        info = run_tool("INSTAGRAM_GET_USER_INFO", {"ig_user_id": "me"})
+        info = run_tool("INSTAGRAM_GET_USER_INFO", {})
         print("Connection OK. Instagram account:", json.dumps(info)[:300]); return 0
     dry, force = os.environ.get("DRY_RUN") == "1", os.environ.get("FORCE") == "1"
     now = dt.datetime.now(TZ); today = now.date().isoformat(); h = history()
