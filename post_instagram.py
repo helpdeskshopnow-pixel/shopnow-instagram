@@ -6,7 +6,7 @@ already-connected Instagram account.
 
 Secrets/env: COMPOSIO_API_KEY (secret), IG_CONNECTED_ACCOUNT_ID (variable or secret, the Composio
 connected account id for Instagram), IG_USER_ID (default 28310084391998367),
-POST_TZ (default Asia/Kabul), POST_HOUR (8), LATEST_HOUR (20), GITHUB_REPOSITORY (set by Actions).
+POST_TZ (default Europe/London), POST_HOUR (8), LATEST_HOUR (20), GITHUB_REPOSITORY (set by Actions).
 Modes: CHECK=1 only reads the Instagram profile to prove the connection works; DRY_RUN=1 prints
 what would be posted; FORCE=1 ignores the hour/once-a-day checks.
 """
@@ -22,7 +22,7 @@ API = "https://backend.composio.dev/api/v3.1/tools/execute/"
 KEY = os.environ.get("COMPOSIO_API_KEY", "")
 ACC = os.environ.get("IG_CONNECTED_ACCOUNT_ID", "")
 IG_USER = os.environ.get("IG_USER_ID") or "28310084391998367"
-TZ = ZoneInfo(os.environ.get("POST_TZ") or "Asia/Kabul")
+TZ = ZoneInfo(os.environ.get("POST_TZ") or "Europe/London")
 POST_HOUR = int(os.environ.get("POST_HOUR") or 8)
 LATEST_HOUR = int(os.environ.get("LATEST_HOUR") or 20)
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
